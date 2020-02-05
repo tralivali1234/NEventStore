@@ -2,6 +2,7 @@ namespace NEventStore.Persistence
 {
     using System;
     using System.Collections.Generic;
+    using System.Linq;
 
     public static class PersistStreamsExtensions
     {
@@ -13,11 +14,12 @@ namespace NEventStore.Persistence
         /// <returns>All commits that have occurred on or after the specified starting time.</returns>
         /// <exception cref="StorageException" />
         /// <exception cref="StorageUnavailableException" />
+        [Obsolete("Will be removed in a future revision because of inconsistency with GetFrom(checkpointToken) which returns commits from all the buckets")]
         public static IEnumerable<ICommit> GetFrom(this IPersistStreams persistStreams, DateTime start)
         {
             if (persistStreams == null)
             {
-                throw new ArgumentException("persistStreams is null");
+                throw new ArgumentNullException(nameof(persistStreams));
             }
             return persistStreams.GetFrom(Bucket.Default, start);
         }
@@ -31,11 +33,12 @@ namespace NEventStore.Persistence
         /// <returns>All commits that have occurred on or after the specified starting time and before the end time.</returns>
         /// <exception cref="StorageException" />
         /// <exception cref="StorageUnavailableException" />
+        [Obsolete("Will be removed in a future revision because of inconsistency with GetFrom(checkpointToken, from, to) which returns commits from all the buckets")]
         public static IEnumerable<ICommit> GetFromTo(this IPersistStreams persistStreams, DateTime start, DateTime end)
         {
             if (persistStreams == null)
             {
-                throw new ArgumentException("persistStreams is null");
+                throw new ArgumentNullException(nameof(persistStreams));
             }
             return persistStreams.GetFromTo(Bucket.Default, start, end);
         }
@@ -49,22 +52,22 @@ namespace NEventStore.Persistence
         {
             if (persistStreams == null)
             {
-                throw new ArgumentException("persistStreams is null");
+                throw new ArgumentNullException(nameof(persistStreams));
             }
             persistStreams.DeleteStream(Bucket.Default, streamId);
         }
 
         /// <summary>
-        ///     Gets all commits after from start checkpoint.
+        /// Returns a single commit from any bucket.
+        /// Wrapper for the <see cref="IPersistStreams.GetFromTo(long, long)"/> function in order to
+        /// return a single commit.
         /// </summary>
         /// <param name="persistStreams">The IPersistStreams instance.</param>
-        public static IEnumerable<ICommit> GetFromStart(this IPersistStreams persistStreams)
+        /// <param name="checkpointToken">The checkpoint token that mark the commit to read.</param>
+        /// <returns>A single commit.</returns>
+        public static ICommit GetCommit(this IPersistStreams persistStreams, Int64 checkpointToken)
         {
-            if (persistStreams == null)
-            {
-                throw new ArgumentException("persistStreams is null");
-            }
-            return persistStreams.GetFrom(0);
+            return persistStreams.GetFromTo(checkpointToken - 1, checkpointToken).SingleOrDefault();
         }
     }
 }

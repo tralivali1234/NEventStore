@@ -10,20 +10,36 @@ namespace NEventStore
         Justification = "This behaves like a stream--not a .NET 'Stream' object, but a stream nonetheless.")]
     public sealed class OptimisticEventStream : IEventStream
     {
-        private static readonly ILog Logger = LogFactory.BuildLogger(typeof (OptimisticEventStream));
+        private static readonly ILog Logger = LogFactory.BuildLogger(typeof(OptimisticEventStream));
         private readonly ICollection<EventMessage> _committed = new LinkedList<EventMessage>();
+        private readonly ImmutableCollection<EventMessage> _committedImmutableWrapper;
         private readonly IDictionary<string, object> _committedHeaders = new Dictionary<string, object>();
+        private readonly ImmutableDictionary<string, object> _committedHeadersImmutableWrapper;
         private readonly ICollection<EventMessage> _events = new LinkedList<EventMessage>();
+        private readonly ImmutableCollection<EventMessage> _eventsImmutableWraper;
         private readonly ICollection<Guid> _identifiers = new HashSet<Guid>();
         private readonly ICommitEvents _persistence;
-        private readonly IDictionary<string, object> _uncommittedHeaders = new Dictionary<string, object>();
         private bool _disposed;
+        // a stream is considered partial if we haven't read all the events in a commit
+        private bool _isPartialStream;
+
+        public string BucketId { get; }
+        public string StreamId { get; }
+        public int StreamRevision { get; private set; }
+        public int CommitSequence { get; private set; }
+        public ICollection<EventMessage> CommittedEvents { get => _committedImmutableWrapper; }
+        public IDictionary<string, object> CommittedHeaders { get => _committedHeadersImmutableWrapper; }
+        public ICollection<EventMessage> UncommittedEvents { get => _eventsImmutableWraper; }
+        public IDictionary<string, object> UncommittedHeaders { get; } = new Dictionary<string, object>();
 
         public OptimisticEventStream(string bucketId, string streamId, ICommitEvents persistence)
         {
             BucketId = bucketId;
             StreamId = streamId;
             _persistence = persistence;
+            _committedImmutableWrapper = new ImmutableCollection<EventMessage>(_committed);
+            _eventsImmutableWraper = new ImmutableCollection<EventMessage>(_events);
+            _committedHeadersImmutableWrapper = new ImmutableDictionary<string, object>(_committedHeaders);
         }
 
         public OptimisticEventStream(string bucketId, string streamId, ICommitEvents persistence, int minRevision, int maxRevision)
@@ -46,54 +62,38 @@ namespace NEventStore
             StreamRevision = snapshot.StreamRevision + _committed.Count;
         }
 
-        public string BucketId { get; private set; }
-        public string StreamId { get; private set; }
-        public int StreamRevision { get; private set; }
-        public int CommitSequence { get; private set; }
-
-        public ICollection<EventMessage> CommittedEvents
-        {
-            get { return new ImmutableCollection<EventMessage>(_committed); }
-        }
-
-        public IDictionary<string, object> CommittedHeaders
-        {
-            get { return _committedHeaders; }
-        }
-
-        public ICollection<EventMessage> UncommittedEvents
-        {
-            get { return new ImmutableCollection<EventMessage>(_events); }
-        }
-
-        public IDictionary<string, object> UncommittedHeaders
-        {
-            get { return _uncommittedHeaders; }
-        }
-
         public void Add(EventMessage uncommittedEvent)
         {
             if (uncommittedEvent == null)
             {
-                throw new ArgumentNullException("uncommittedEvent");
+                throw new ArgumentNullException(nameof(uncommittedEvent));
             }
 
             if (uncommittedEvent.Body == null)
             {
-                throw new ArgumentNullException("uncommittedEvent.Body");
+                throw new ArgumentNullException(nameof(uncommittedEvent.Body));
             }
 
-            Logger.Verbose(Resources.AppendingUncommittedToStream, uncommittedEvent.Body.GetType(), StreamId);
+            if (Logger.IsVerboseEnabled) Logger.Verbose(Resources.AppendingUncommittedToStream, uncommittedEvent.Body.GetType(), StreamId);
             _events.Add(uncommittedEvent);
         }
 
         public void CommitChanges(Guid commitId)
         {
-            Logger.Verbose(Resources.AttemptingToCommitChanges, StreamId);
+            if (Logger.IsVerboseEnabled) Logger.Verbose(Resources.AttemptingToCommitChanges, StreamId);
+
+            if (_isPartialStream)
+            {
+                if (Logger.IsDebugEnabled) Logger.Debug(Resources.CannotAddCommitsToPartiallyLoadedStream, StreamId, StreamRevision);
+
+                RefreshStreamAfterConcurrencyException();
+
+                throw new ConcurrencyException();
+            }
 
             if (_identifiers.Contains(commitId))
             {
-                throw new DuplicateCommitException(String.Format(Messages.DuplicateCommitIdException, commitId));
+                throw new DuplicateCommitException(String.Format(Messages.DuplicateCommitIdException, StreamId, BucketId, commitId));
             }
 
             if (!HasChanges())
@@ -107,34 +107,47 @@ namespace NEventStore
             }
             catch (ConcurrencyException cex)
             {
-                Logger.Debug(Resources.UnderlyingStreamHasChanged, StreamId, cex.Message); //not useful to log info because the exception will be thrown 
-                IEnumerable<ICommit> commits = _persistence.GetFrom(BucketId, StreamId, StreamRevision + 1, int.MaxValue);
-                PopulateStream(StreamRevision + 1, int.MaxValue, commits);
+                if (Logger.IsDebugEnabled) Logger.Debug(Resources.UnderlyingStreamHasChanged, StreamId, cex.Message);
+
+                RefreshStreamAfterConcurrencyException();
 
                 throw;
             }
         }
 
+        private void RefreshStreamAfterConcurrencyException()
+        {
+            int refreshFromRevision = StreamRevision + 1;
+            IEnumerable<ICommit> commits = _persistence.GetFrom(BucketId, StreamId, refreshFromRevision, int.MaxValue);
+            PopulateStream(refreshFromRevision, int.MaxValue, commits);
+        }
+
         public void ClearChanges()
         {
-            Logger.Verbose(Resources.ClearingUncommittedChanges, StreamId);
+            if (Logger.IsVerboseEnabled) Logger.Verbose(Resources.ClearingUncommittedChanges, StreamId);
             _events.Clear();
-            _uncommittedHeaders.Clear();
+            UncommittedHeaders.Clear();
         }
 
         private void PopulateStream(int minRevision, int maxRevision, IEnumerable<ICommit> commits)
         {
+            _isPartialStream = false;
             foreach (var commit in commits ?? Enumerable.Empty<ICommit>())
             {
-                Logger.Verbose(Resources.AddingCommitsToStream, commit.CommitId, commit.Events.Count, StreamId);
                 _identifiers.Add(commit.CommitId);
 
-                CommitSequence = commit.CommitSequence;
                 int currentRevision = commit.StreamRevision - commit.Events.Count + 1;
+                // just in case the persistence returned more commits than it should be
                 if (currentRevision > maxRevision)
                 {
+                    _isPartialStream = true;
+                    if (Logger.IsDebugEnabled) Logger.Debug(Resources.IgnoringBeyondRevision, commit.CommitId, StreamId, maxRevision);
                     return;
                 }
+
+                if (Logger.IsVerboseEnabled) Logger.Verbose(Resources.AddingCommitsToStream, commit.CommitId, commit.Events.Count, StreamId);
+
+                CommitSequence = commit.CommitSequence;
 
                 CopyToCommittedHeaders(commit);
                 CopyToEvents(minRevision, maxRevision, currentRevision, commit);
@@ -155,13 +168,14 @@ namespace NEventStore
             {
                 if (currentRevision > maxRevision)
                 {
-                    Logger.Debug(Resources.IgnoringBeyondRevision, commit.CommitId, StreamId, maxRevision);
+                    _isPartialStream = true;
+                    if (Logger.IsDebugEnabled) Logger.Debug(Resources.IgnoringBeyondRevision, commit.CommitId, StreamId, maxRevision);
                     break;
                 }
 
                 if (currentRevision++ < minRevision)
                 {
-                    Logger.Debug(Resources.IgnoringBeforeRevision, commit.CommitId, StreamId, maxRevision);
+                    if (Logger.IsDebugEnabled) Logger.Debug(Resources.IgnoringBeforeRevision, commit.CommitId, StreamId, maxRevision);
                     continue;
                 }
 
@@ -182,7 +196,7 @@ namespace NEventStore
                 return true;
             }
 
-            Logger.Info(Resources.NoChangesToCommit, StreamId);
+            if (Logger.IsInfoEnabled) Logger.Info(Resources.NoChangesToCommit, StreamId);
             return false;
         }
 
@@ -190,7 +204,7 @@ namespace NEventStore
         {
             CommitAttempt attempt = BuildCommitAttempt(commitId);
 
-            Logger.Debug(Resources.PersistingCommit, commitId, StreamId, attempt.Events == null ? 0 : attempt.Events.Count);
+            if (Logger.IsDebugEnabled) Logger.Debug(Resources.PersistingCommit, commitId, StreamId, attempt.Events?.Count ?? 0);
             ICommit commit = _persistence.Commit(attempt);
 
             PopulateStream(StreamRevision + 1, attempt.StreamRevision, new[] { commit });
@@ -199,7 +213,7 @@ namespace NEventStore
 
         private CommitAttempt BuildCommitAttempt(Guid commitId)
         {
-            Logger.Verbose(Resources.BuildingCommitAttempt, commitId, StreamId);
+            if (Logger.IsVerboseEnabled) Logger.Verbose(Resources.BuildingCommitAttempt, commitId, StreamId);
             return new CommitAttempt(
                 BucketId,
                 StreamId,
@@ -207,7 +221,7 @@ namespace NEventStore
                 commitId,
                 CommitSequence + 1,
                 SystemTime.UtcNow,
-                _uncommittedHeaders.ToDictionary(x => x.Key, x => x.Value),
+                UncommittedHeaders.ToDictionary(x => x.Key, x => x.Value),
                 _events.ToList());
         }
 

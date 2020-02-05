@@ -117,7 +117,28 @@
   <resheader name="writer">
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
-  <data name="PressAnyKey" xml:space="preserve">
-    <value>Press any key to continue...</value>
+  <data name="DeserializingStream" xml:space="preserve">
+    <value>Deserializing stream to object of type '{0}'.</value>
+  </data>
+  <data name="SerializingGraph" xml:space="preserve">
+    <value>Serializing object graph of type '{0}'.</value>
+  </data>
+  <data name="InvalidKeyLength" xml:space="preserve">
+    <value>The encryption key must be exactly 16 bytes.</value>
+  </data>
+  <data name="InspectingTextStream" xml:space="preserve">
+    <value>Inspecting text-based stream contents.</value>
+  </data>
+  <data name="RegisteringKnownType" xml:space="preserve">
+    <value>Registering type '{0}' as a known type.</value>
+  </data>
+  <data name="TypeIsArray" xml:space="preserve">
+    <value>Objects of type '{0}' are considered to be an array: '{1}'.</value>
+  </data>
+  <data name="UsingTypedSerializer" xml:space="preserve">
+    <value>The object to be serialized is of type '{0}'.  Using a typed serializer for the unknown type.</value>
+  </data>
+  <data name="UsingUntypedSerializer" xml:space="preserve">
+    <value>The object to be serialized is of type '{0}'.  Using an untyped serializer for the known type.</value>
   </data>
 </root>

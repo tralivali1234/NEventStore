@@ -5,24 +5,16 @@ namespace NEventStore.Persistence
     using System.Linq;
     using NEventStore.Logging;
 
-    public class PipelineHooksAwarePersistanceDecorator : IPersistStreams
+    public sealed class PipelineHooksAwarePersistanceDecorator : IPersistStreams
     {
-        private static readonly ILog Logger = LogFactory.BuildLogger(typeof (PipelineHooksAwarePersistanceDecorator));
+        private static readonly ILog Logger = LogFactory.BuildLogger(typeof(PipelineHooksAwarePersistanceDecorator));
         private readonly IPersistStreams _original;
         private readonly IEnumerable<IPipelineHook> _pipelineHooks;
 
         public PipelineHooksAwarePersistanceDecorator(IPersistStreams original, IEnumerable<IPipelineHook> pipelineHooks)
         {
-            if (original == null)
-            {
-                throw new ArgumentNullException("original");
-            }
-            if (pipelineHooks == null)
-            {
-                throw new ArgumentNullException("pipelineHooks");
-            }
-            _original = original;
-            _pipelineHooks = pipelineHooks;
+            _original = original ?? throw new ArgumentNullException(nameof(original));
+            _pipelineHooks = pipelineHooks ?? throw new ArgumentNullException(nameof(pipelineHooks));
         }
 
         public void Dispose()
@@ -70,9 +62,19 @@ namespace NEventStore.Persistence
             return ExecuteHooks(_original.GetFrom(checkpointToken));
         }
 
+        public IEnumerable<ICommit> GetFromTo(Int64 from, Int64 to)
+        {
+            return ExecuteHooks(_original.GetFromTo(from, to));
+        }
+
         public IEnumerable<ICommit> GetFrom(string bucketId, Int64 checkpointToken)
         {
             return ExecuteHooks(_original.GetFrom(bucketId, checkpointToken));
+        }
+
+        public IEnumerable<ICommit> GetFromTo(string bucketId, Int64 from, Int64 to)
+        {
+            return ExecuteHooks(_original.GetFromTo(bucketId, from, to));
         }
 
         public IEnumerable<ICommit> GetFromTo(string bucketId, DateTime start, DateTime end)
@@ -124,13 +126,13 @@ namespace NEventStore.Persistence
                 ICommit filtered = commit;
                 foreach (var hook in _pipelineHooks.Where(x => (filtered = x.Select(filtered)) == null))
                 {
-                    Logger.Info(Resources.PipelineHookSkippedCommit, hook.GetType(), commit.CommitId);
+                    if (Logger.IsInfoEnabled) Logger.Info(Resources.PipelineHookSkippedCommit, hook.GetType(), commit.CommitId);
                     break;
                 }
 
                 if (filtered == null)
                 {
-                    Logger.Info(Resources.PipelineHookFilteredCommit);
+                    if (Logger.IsInfoEnabled) Logger.Info(Resources.PipelineHookFilteredCommit);
                 }
                 else
                 {

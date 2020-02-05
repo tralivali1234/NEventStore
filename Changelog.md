@@ -1,5 +1,63 @@
 # NEventStore Versions
 
+## 7.0.0
+
+- The IPersistStreams interface got some major changes:
+	- Added new GetFromTo(Int64, Int64) and GetFromTo(Strimg, Int64, Int64) methods to the IPersistStreams interface.
+	- Extension methods PersistStreamsExtensions.GetFrom(DateTime) and PersistStreamsExtensions.GetFromTo(DateTime, DateTime) were marked obsolete and will be removed.
+	- A new PersistStreamsExtensions.GetCommit(Int64) method was added to retrieve a single commit [#445](https://github.com/NEventStore/NEventStore/issues/445).
+- PollingClient was moved to its own NEventStore.PollingClient NuGet package [#467](https://github.com/NEventStore/NEventStore/issues/467).
+- Added more information to the DuplicateCommitException error message (StreamId and BucketId), also the information provided by the Persistence providers will be reviewed [#372](https://github.com/NEventStore/NEventStore/issues/372).
+
+### Breaking Changes
+
+- The default value of 0 has been removed from the IPersistStreams.GetFrom(Int64) method.
+- Removed the almost useless GetFromStart() extension method: use IPersistStream.GetFrom(0).
+- Bson serializer was moved from NEventStore.Serialization.Json to its own package: 'NEventStore.Serialization.Bson'. Closes: [#479](https://github.com/NEventStore/NEventStore/issues/479).
+- PollingClient was moved to its own package: add a reference to NEventStore.PollingClient NuGet package. Also the namespace was changed from NEventStore.Client to NEventStorePollingClient.
+
+## 6.1.0
+
+Enlist in ambient transaction has been removed from the mail library and added to the persistence drivers implementations, each driver has its own way to support, enable or disable the feature. As of now this change will mainly impact Microsoft SQL Server users, because all other persistence plugins didn't use transactions at all.
+
+All the transactions (or their suppression) should be explicitly managed by the user.
+
+Minor optimizations were made if no pipeline hooks are used.
+
+### Breaking Changes
+
+- **PipelineHookBase**: changed the way the Dispose pattern was implemented to be compliant with the framework guildelines. Move all the dispose logic to the overridden Dispose(bool disposing) method of your pipeline hook class.
+- **OptimisticPipelineHook** optmization is not configured and enabled by default (if not enlisting in ambient transactions) anymore; it now must be explicitly enabled calling UseOptimisticPipelineHook() when configuring NEventStore. Do not use it if you plan to use transactions. To restore the previous behavior call .UseOptimisticPipelineHook() when configuring NEventStore.
+- **EnlistInAmbientTransaction** has been removed from the core NEventStore library. It will be added to specific persistence drivers implementations.
+
+## 6.0.0
+
+__Version 6.x is not backwards compatible with version 5.x.__ Updating to NEventStore 6.x without doing some preparation work will result in problems.
+
+### New Features
+
+- dotnet standard 2.0 , dotnet core 2.0 are now supported for the following projects: NEventStore, NEventStore.Domain, NEventStore.Persistence.Sql, NEventStore.Persistence.MongoDb
+
+### Breaking Changes
+
+- **Removed Dispatcher and dispatching mechanic, use the PollingClient**: it was marked obsolete in the version 5.x, you should dispatch events with other mechanisms, like using a PollingClient.
+More information on this topic in the issue: [Race condition in sync and async dispatchers can result in subscribers getting commits / events out of order](https://github.com/NEventStore/NEventStore/issues/360).
+- **Removed LongCheckpoint class**: checkpoint now is a plain Int64, there is no need to keep a LongCheckpoint class anymore. 
+- **PollingClient was removed because it used to depend on Rx**: you can [read more information here](src/NEventStore/Client/README.MD). The new polling client class is called PollingClient2, this however should be considered as a sample implementation you can use to derive your own.
+- **JsonSerializer and BsonSerializer were moved in a separate assembly**: if you need them, you should reference the NEventStore.Serialization.Json assembly or implement your own serializers that depend on the Json.Net version you need.
+- **EventMessage** class is now sealed.
+- **OptimistcEventStream throws exceptions if a null message or a message with null body is added to the stream**. Previously if you called Add with null event message or add with an eventmessage with null body, the add operation was ignored without any warning or error. 
+
+## 6.0.0-rc-1
+
+New features:
+
+- improved logging performances ([#468](https://github.com/NEventStore/NEventStore/issues/468)).
+
+Bug fixed:
+
+- adding events in the middle of a commit should throw ConsuccencyException ([#420](https://github.com/NEventStore/NEventStore/issues/420)).
+
 ## 6.0.0-rc-0
 
 __Version 6.x is not backwards compatible with version 5.x.__ Updating to NEventStore 6.x without doing some preparation work will result in problems.
@@ -10,11 +68,11 @@ __Version 6.x is not backwards compatible with version 5.x.__ Updating to NEvent
 
 ### Breaking changes
 
-- **Removed Dispatcher and dispatching mechanic, use the PollingClient**: it was marked obsolete in the version 5.x, you should dispatch with other mechanism, like using a PollingClient.
+- **Removed Dispatcher and dispatching mechanic, use the PollingClient**: it was marked obsolete in the version 5.x, you should dispatch events with other mechanisms, like using a PollingClient.
 More information on this topic in the issue: [Race condition in sync and async dispatchers can result in subscribers getting commits / events out of order](https://github.com/NEventStore/NEventStore/issues/360).
 - **Removed LongCheckpoint class**: checkpoint now is a plain Int64, there is no need to keep a LongCheckpoint class anymore. 
 - **PollingClient was removed because it used to depend on Rx**: you can [read more information here](src/NEventStore/Client/README.MD). The new polling client class is called PollingClient2, this however should be considered as a sample implementation you can use to derive your own.
-- **JsonSerializer and BsonSerializer were moved in a separate assembly**: if you need them, you should reference the NEventStore.Serialization.Json assembly or implementing your own serializers that depend on the Json.Net version you need.
+- **JsonSerializer and BsonSerializer were moved in a separate assembly**: if you need them, you should reference the NEventStore.Serialization.Json assembly or implement your own serializers that depend on the Json.Net version you need.
 - **EventMessage** class is now sealed.
 - **OptimistcEventStream throws exceptions if a null message or a message with null body is added to the stream**. Previously if you called Add with null event message or add with an eventmessage with null body, the add operation was ignored without any warning or error. 
 

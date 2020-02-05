@@ -8,23 +8,12 @@ namespace NEventStore.Conversion
 
     public class EventUpconverterPipelineHook : PipelineHookBase
     {
-        private static readonly ILog Logger = LogFactory.BuildLogger(typeof (EventUpconverterPipelineHook));
+        private static readonly ILog Logger = LogFactory.BuildLogger(typeof(EventUpconverterPipelineHook));
         private readonly IDictionary<Type, Func<object, object>> _converters;
 
         public EventUpconverterPipelineHook(IDictionary<Type, Func<object, object>> converters)
         {
-            if (converters == null)
-            {
-                throw new ArgumentNullException("converters");
-            }
-
-            _converters = converters;
-        }
-
-        public override void Dispose()
-        {
-            Dispose(true);
-            GC.SuppressFinalize(this);
+            _converters = converters ?? throw new ArgumentNullException(nameof(converters));
         }
 
         public override ICommit Select(ICommit committed)
@@ -58,21 +47,21 @@ namespace NEventStore.Conversion
                 eventMessages);
         }
 
-        protected virtual void Dispose(bool disposing)
+        protected override void Dispose(bool disposing)
         {
             _converters.Clear();
+            base.Dispose(disposing);
         }
 
         private object Convert(object source)
         {
-            Func<object, object> converter;
-            if (!_converters.TryGetValue(source.GetType(), out converter))
+            if (!_converters.TryGetValue(source.GetType(), out Func<object, object> converter))
             {
                 return source;
             }
 
             object target = converter(source);
-            Logger.Debug(Resources.ConvertingEvent, source.GetType(), target.GetType());
+            if (Logger.IsDebugEnabled) Logger.Debug(Resources.ConvertingEvent, source.GetType(), target.GetType());
 
             return Convert(target);
         }
